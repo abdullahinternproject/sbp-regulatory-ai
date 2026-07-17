@@ -309,24 +309,29 @@ system_prompt = (
 )
     
     # 5. Call Groq
-# 1. Define the function without passing 'citations' as an input parameter
-def generate_response(system_prompt, combined_context, user_query):
-    citations = []  # Default empty list for citations
+# 1. Define the function (citations is created INSIDE the function)
+def generate_response(prompt, context, query):
+    citations_list = []  # Initialize safely inside
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Regulatory Documents:\n{context}\n\nUser Question: {query}"}
             ],
             temperature=0.1
         )
-        return completion.choices[0].message.content, citations
+        return completion.choices[0].message.content, citations_list
     except Exception as e:
-        return f"Error connecting to AI engine: {e}", citations
+        return f"Error connecting to AI engine: {e}", citations_list
 
-# 2. Call the function with only system_prompt, combined_context, and user_query
-response_text, citations = generate_response(system_prompt, combined_context, user_query)
+# 2. Only call the function IF a user query actually exists
+if 'user_query' in locals() and user_query:
+    # Ensure combined_context has a fallback if not defined
+    if 'combined_context' not in locals():
+        combined_context = ""
+    
+    response_text, citations = generate_response(system_prompt, combined_context, user_query)
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. HEADER
 # ══════════════════════════════════════════════════════════════════════════════
