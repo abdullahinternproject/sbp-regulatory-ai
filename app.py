@@ -309,8 +309,9 @@ system_prompt = (
 )
     
     # 5. Call Groq
-# Wrap the AI generation logic inside a defined function
-def generate_response(system_prompt, combined_context, user_query, citations):
+# 1. Define the function without passing 'citations' as an input parameter
+def generate_response(system_prompt, combined_context, user_query):
+    citations = []  # Default empty list for citations
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -318,14 +319,14 @@ def generate_response(system_prompt, combined_context, user_query, citations):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
             ],
-            temperature=0.1  # Lower temperature for more factual consistency
+            temperature=0.1
         )
         return completion.choices[0].message.content, citations
     except Exception as e:
-        return f"Error connecting to AI engine: {e}", []
+        return f"Error connecting to AI engine: {e}", citations
 
-# Call the function to execute the query
-response_text, citations = generate_response(system_prompt, combined_context, user_query, citations)
+# 2. Call the function with only system_prompt, combined_context, and user_query
+response_text, citations = generate_response(system_prompt, combined_context, user_query)
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. HEADER
 # ══════════════════════════════════════════════════════════════════════════════
