@@ -312,16 +312,34 @@ system_prompt = (
 # 1. Define the function (citations is created INSIDE the function)
 # 1. Rename and update the function to handle context retrieval internally
 def generate_intelligent_answer(user_query):
-    # Retrieve matching regulatory context from Pinecone
+    citations_list = []
+    
+    # 1. Retrieve matching regulatory context from Pinecone
     try:
         docs = vectorstore.similarity_search(user_query, k=3)
         combined_context = "\n\n".join([doc.page_content for doc in docs])
-        citations_list = [f"Source Page {doc.metadata.get('page', 'N/A')}" for doc in docs]
-    except Exception:
+        
+        # 2. Extract original metadata & links for render_citations()
+        for doc in docs:
+            metadata = doc.metadata
+            # Look for common URL/source keys in Pinecone metadata
+            pdf_link = metadata.get("source") or metadata.get("url") or metadata.get("file_path") or metadata.get("title", "SBP Circular")
+            page_num = metadata.get("page", None)
+            
+            citation_item = {
+                "source": pdf_link,
+                "title": metadata.get("title") or metadata.get("file_name") or f"Circular Source: {pdf_link}",
+                "page": page_num
+            }
+            
+            if citation_item not in citations_list:
+                citations_list.append(citation_item)
+                
+    except Exception as e:
         combined_context = ""
         citations_list = []
 
-    # Call Groq LLM
+    # 3. Call Groq LLM
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
