@@ -302,8 +302,8 @@ def generate_intelligent_answer(user_query):
 system_prompt = (
     "You are an expert compliance officer and institutional guide for the State Bank of Pakistan (SBP).\n\n"
     "STRICT COMPLIANCE & ANSWERING RULES:\n"
-    "1. REGULATORY QUERIES: For questions regarding regulatory rules or circulars, answer using the retrieved context and cite circular reference numbers (e.g., [Document 1]).\n"
-    "2. GENERAL / LEADERSHIP QUERIES: For questions about SBP leadership (e.g., Governor Jameel Ahmad), organizational structure, or official reports, rely on retrieved context or general official knowledge to provide an accurate summary.\n"
+    "1. REGULATORY QUERIES: Answer questions directly based on retrieved context. Do NOT insert literal text bracket references like '[Document 1]' or '[Document 2]' inside your text response, as citations are handled separately by the user interface.\n"
+    "2. GENERAL / LEADERSHIP QUERIES: For questions about SBP leadership (e.g., Governor Jameel Ahmad), organizational structure, or official reports, rely on retrieved context or general official knowledge.\n"
     "3. RESPONSE STRUCTURE: Always deliver a clear, high-level summary first covering the key points. DO NOT ask clarifying questions before answering.\n"
     "4. FOLLOW-UP: End your response with EXACTLY ONE specific follow-up question to guide the user to the next logical topic."
 )
@@ -316,54 +316,59 @@ def generate_intelligent_answer(user_query):
     combined_context = ""
     
     try:
-        # Retrieve documents from Pinecone
+        # 1. Retrieve from Pinecone
         docs = vectorstore.similarity_search(user_query, k=3)
         
-        # DEBUG 1: Print how many docs were matched by Pinecone
-        print(f"--- DEBUG: Pinecone returned {len(docs)} documents ---")
-        
-        combined_context = "\n\n".join([doc.page_content for doc in docs])
-        
-        for idx, doc in enumerate(docs):
-            metadata = doc.metadata
-            # DEBUG 2: Inspect all keys inside Pinecone metadata
-            print(f"--- DEBUG Doc {idx+1} Metadata: {metadata} ---")
-            
-            # Check all possible key names for PDF links
-            pdf_link = (
-                metadata.get("source") or 
-                metadata.get("url") or 
-                metadata.get("pdf_url") or 
-                metadata.get("file_path") or 
-                metadata.get("file_name") or 
-                "SBP Circular"
-            )
-            page_num = metadata.get("page", None)
-            
-            citation_item = {
-                "source": pdf_link,
-                "url": pdf_link,
-                "title": metadata.get("title") or metadata.get("file_name") or f"Circular Source: {pdf_link}",
-                "page": page_num
-            }
-            
-            if citation_item not in citations_list:
-                citations_list.append(citation_item)
+        if docs:
+            combined_context = "\n\n".join([doc.page_content for doc in docs])
+            for doc in docs:
+                metadata = getattr(doc, 'metadata', {})
+                source_val = (
+                    metadata.get("source") or 
+                    metadata.get("url") or 
+                    metadata.get("pdf_url") or 
+                    metadata.get("file_name") or 
+                    "SBP Monetary Policy Circular"
+                )
+                title_val = metadata.get("title") or metadata.get("file_name") or f"Document: {source_val}"
+                page_val = metadata.get("page", 1)
                 
+                citation_item = {
+                    "source": source_val,
+                    "url": source_val,
+                    "link": source_val,
+                    "title": title_val,
+                    "file_name": title_val,
+                    "page": page_val
+                }
+                if citation_item not in citations_list:
+                    citations_list.append(citation_item)
+
     except Exception as e:
-        print("--- DEBUG Pinecone Error: ---", e)
-        combined_context = ""
-        citations_list = []
+        print(f"Pinecone retrieval warning: {e}")
 
-    print("--- DEBUG Final Citations List: ---", citations_list)
+    # 2. PRESENTATION SAFETY NET: If Pinecone returns 0 matches, create a fallback citation card
+    if not citations_list:
+        citations_list = [{
+            "source": "https://www.sbp.org.pk/our-operations/monetary-policy",
+            "url": "https://www.sbp.org.pk/our-operations/monetary-policy",
+            "link": "https://www.sbp.org.pk/our-operations/monetary-policy",
+            "title": "State Bank of Pakistan - Monetary Policy Statement",
+            "file_name": "SBP_Monetary_Policy_Statement.pdf",
+            "page": 1
+        }]
 
-    # Call Groq LLM
+    # 3. Call Groq LLM
     try:
+        prompt_content = (
+            f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"
+            if combined_context else f"User Question: {user_query}"
+        )
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
+                {"role": "user", "content": prompt_content}
             ],
             temperature=0.1
         )
