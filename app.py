@@ -338,7 +338,7 @@ def generate_intelligent_answer(user_query):
     except Exception as e:
         combined_context = ""
         citations_list = []
-
+    print("DEBUG CITATIONS:", citations_list) # Shows up in Streamlit Cloud logs
     # 3. Call Groq LLM
     try:
         completion = groq_client.chat.completions.create(
