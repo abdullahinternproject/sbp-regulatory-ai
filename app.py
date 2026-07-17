@@ -313,21 +313,36 @@ system_prompt = (
 # 1. Rename and update the function to handle context retrieval internally
 def generate_intelligent_answer(user_query):
     citations_list = []
+    combined_context = ""
     
-    # 1. Retrieve matching regulatory context from Pinecone
     try:
+        # Retrieve documents from Pinecone
         docs = vectorstore.similarity_search(user_query, k=3)
+        
+        # DEBUG 1: Print how many docs were matched by Pinecone
+        print(f"--- DEBUG: Pinecone returned {len(docs)} documents ---")
+        
         combined_context = "\n\n".join([doc.page_content for doc in docs])
         
-        # 2. Extract original metadata & links for render_citations()
-        for doc in docs:
+        for idx, doc in enumerate(docs):
             metadata = doc.metadata
-            # Look for common URL/source keys in Pinecone metadata
-            pdf_link = metadata.get("source") or metadata.get("url") or metadata.get("file_path") or metadata.get("title", "SBP Circular")
+            # DEBUG 2: Inspect all keys inside Pinecone metadata
+            print(f"--- DEBUG Doc {idx+1} Metadata: {metadata} ---")
+            
+            # Check all possible key names for PDF links
+            pdf_link = (
+                metadata.get("source") or 
+                metadata.get("url") or 
+                metadata.get("pdf_url") or 
+                metadata.get("file_path") or 
+                metadata.get("file_name") or 
+                "SBP Circular"
+            )
             page_num = metadata.get("page", None)
             
             citation_item = {
                 "source": pdf_link,
+                "url": pdf_link,
                 "title": metadata.get("title") or metadata.get("file_name") or f"Circular Source: {pdf_link}",
                 "page": page_num
             }
@@ -336,10 +351,13 @@ def generate_intelligent_answer(user_query):
                 citations_list.append(citation_item)
                 
     except Exception as e:
+        print("--- DEBUG Pinecone Error: ---", e)
         combined_context = ""
         citations_list = []
-    print("DEBUG CITATIONS:", citations_list) # Shows up in Streamlit Cloud logs
-    # 3. Call Groq LLM
+
+    print("--- DEBUG Final Citations List: ---", citations_list)
+
+    # Call Groq LLM
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -351,7 +369,7 @@ def generate_intelligent_answer(user_query):
         )
         return completion.choices[0].message.content, citations_list
     except Exception as e:
-        return f"Error connecting to AI engine: {e}", []
+        return f"Error connecting to AI engine: {e}", citations_list
 
 # 2. Only call the function IF a user query actually exists
 if 'user_query' in locals() and user_query:
