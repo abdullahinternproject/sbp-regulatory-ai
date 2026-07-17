@@ -316,44 +316,50 @@ def generate_intelligent_answer(user_query):
     combined_context = ""
     
     try:
-        # 1. Retrieve from Pinecone
+        # 1. Retrieve matching regulatory context from Pinecone
         docs = vectorstore.similarity_search(user_query, k=3)
         
         if docs:
             combined_context = "\n\n".join([doc.page_content for doc in docs])
-            for doc in docs:
+            
+            for idx, doc in enumerate(docs):
                 metadata = getattr(doc, 'metadata', {})
+                
                 source_val = (
                     metadata.get("source") or 
                     metadata.get("url") or 
                     metadata.get("pdf_url") or 
                     metadata.get("file_name") or 
-                    "SBP Monetary Policy Circular"
+                    "SBP Circular PDF"
                 )
-                title_val = metadata.get("title") or metadata.get("file_name") or f"Document: {source_val}"
+                title_val = metadata.get("title") or metadata.get("file_name") or f"Document {idx + 1}"
                 page_val = metadata.get("page", 1)
                 
+                # 'ref' is explicitly defined here to satisfy render_citations() on line 413!
                 citation_item = {
+                    "ref": metadata.get("ref") or f"Doc {idx + 1}",
+                    "title": title_val,
                     "source": source_val,
                     "url": source_val,
                     "link": source_val,
-                    "title": title_val,
                     "file_name": title_val,
                     "page": page_val
                 }
+                
                 if citation_item not in citations_list:
                     citations_list.append(citation_item)
 
     except Exception as e:
-        print(f"Pinecone retrieval warning: {e}")
+        print(f"Pinecone search warning: {e}")
 
-    # 2. PRESENTATION SAFETY NET: If Pinecone returns 0 matches, create a fallback citation card
+    # 2. PRESENTATION SAFETY NET (Ensures render_citations never fails if 0 docs returned)
     if not citations_list:
         citations_list = [{
+            "ref": "SBP Circular",
+            "title": "State Bank of Pakistan - Monetary Policy Statement",
             "source": "https://www.sbp.org.pk/our-operations/monetary-policy",
             "url": "https://www.sbp.org.pk/our-operations/monetary-policy",
             "link": "https://www.sbp.org.pk/our-operations/monetary-policy",
-            "title": "State Bank of Pakistan - Monetary Policy Statement",
             "file_name": "SBP_Monetary_Policy_Statement.pdf",
             "page": 1
         }]
