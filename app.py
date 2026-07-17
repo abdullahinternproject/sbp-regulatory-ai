@@ -310,20 +310,30 @@ system_prompt = (
     
     # 5. Call Groq
 # 1. Define the function (citations is created INSIDE the function)
-def generate_response(prompt, context, query):
-    citations_list = []  # Initialize safely inside
+# 1. Rename and update the function to handle context retrieval internally
+def generate_intelligent_answer(user_query):
+    # Retrieve matching regulatory context from Pinecone
+    try:
+        docs = vectorstore.similarity_search(user_query, k=3)
+        combined_context = "\n\n".join([doc.page_content for doc in docs])
+        citations_list = [f"Source Page {doc.metadata.get('page', 'N/A')}" for doc in docs]
+    except Exception:
+        combined_context = ""
+        citations_list = []
+
+    # Call Groq LLM
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Regulatory Documents:\n{context}\n\nUser Question: {query}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
             ],
             temperature=0.1
         )
         return completion.choices[0].message.content, citations_list
     except Exception as e:
-        return f"Error connecting to AI engine: {e}", citations_list
+        return f"Error connecting to AI engine: {e}", []
 
 # 2. Only call the function IF a user query actually exists
 if 'user_query' in locals() and user_query:
