@@ -309,17 +309,17 @@ system_prompt = (
 )
     
     # 5. Call Groq
-    try:
-        completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
+try:
+    completion = groq_client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
             ],
             temperature=0.1 # Lower temperature for more factual consistency
-        )
-        return completion.choices[0].message.content, citations
-    except Exception as e:
+    )
+    return completion.choices[0].message.content, citations
+except Exception as e:
         return f"Error connecting to AI engine: {e}", []
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. HEADER
