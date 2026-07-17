@@ -309,18 +309,23 @@ system_prompt = (
 )
     
     # 5. Call Groq
-try:
-    completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
-        ],
-        temperature=0.1 # Lower temperature for more factual consistency
-    )
-    return completion.choices[0].message.content, citations
-except Exception as e:
-    return f"Error connecting to AI engine: {e}", []
+# Wrap the AI generation logic inside a defined function
+def generate_response(system_prompt, combined_context, user_query, citations):
+    try:
+        completion = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
+            ],
+            temperature=0.1  # Lower temperature for more factual consistency
+        )
+        return completion.choices[0].message.content, citations
+    except Exception as e:
+        return f"Error connecting to AI engine: {e}", []
+
+# Call the function to execute the query
+response_text, citations = generate_response(system_prompt, combined_context, user_query, citations)
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. HEADER
 # ══════════════════════════════════════════════════════════════════════════════
