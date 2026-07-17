@@ -262,7 +262,7 @@ except Exception as e:
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. INTELLIGENT RETRIEVAL & REASONING PIPELINE  (unchanged logic)
+# 5. INTELLIGENT RETRIEVAL & REASONING PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 def generate_intelligent_answer(user_query):
     # 1. Search Pinecone
@@ -271,19 +271,19 @@ def generate_intelligent_answer(user_query):
         query={"inputs": {"text": user_query}, "top_k": 10},
         fields=["circular_number", "publication_date", "source_url", "chunk_text"]
     )
-    
+
     hits = results.get("result", {}).get("hits", [])
     if not hits:
         return "No relevant regulatory documents found matching your query.", []
-    
-    # 2. Sort by date (Newest first)
+
+    # 2. Sort by date (newest first)
     sorted_hits = sorted(
-        hits, 
-        key=lambda x: x.get("fields", {}).get("publication_date", "0000-00-00"), 
+        hits,
+        key=lambda x: x.get("fields", {}).get("publication_date", "0000-00-00"),
         reverse=True
     )
-    
-    # 3. Build context
+
+    # 3. Build context + citations
     context_blocks = []
     citations = []
     for idx, hit in enumerate(sorted_hits, 1):
@@ -291,104 +291,39 @@ def generate_intelligent_answer(user_query):
         ref = fields.get("circular_number", "Unspecified")
         date = fields.get("publication_date", "Unknown")
         text = fields.get("chunk_text", "")
-        
+
         context_blocks.append(f"Document [{idx}] - Ref: {ref} | Date: {date}\nContent: {text}")
         citations.append({"ref": ref, "date": date, "url": fields.get("source_url", "#")})
-        
+
     combined_context = "\n---\n".join(context_blocks)
-    
-    # 4. Updated System Prompt with strict constraints
-    # 4. Hybrid System Prompt (Regulatory + General SBP Knowledge)
-system_prompt = (
-    "You are an expert compliance officer and institutional guide for the State Bank of Pakistan (SBP).\n\n"
-    "STRICT COMPLIANCE & ANSWERING RULES:\n"
-    "1. REGULATORY QUERIES: Answer questions directly based on retrieved context. Do NOT insert literal text bracket references like '[Document 1]' or '[Document 2]' inside your text response, as citations are handled separately by the user interface.\n"
-    "2. GENERAL / LEADERSHIP QUERIES: For questions about SBP leadership (e.g., Governor Jameel Ahmad), organizational structure, or official reports, rely on retrieved context or general official knowledge.\n"
-    "3. RESPONSE STRUCTURE: Always deliver a clear, high-level summary first covering the key points. DO NOT ask clarifying questions before answering.\n"
-    "4. FOLLOW-UP: End your response with EXACTLY ONE specific follow-up question to guide the user to the next logical topic."
-)
-    
+
+    # 4. System prompt
+    system_prompt = (
+        "You are an expert compliance officer and institutional guide for the State Bank of Pakistan (SBP).\n\n"
+        "STRICT COMPLIANCE & ANSWERING RULES:\n"
+        "1. REGULATORY QUERIES: Answer questions directly based on retrieved context. Do NOT insert literal text bracket references like '[Document 1]' or '[Document 2]' inside your text response, as citations are handled separately by the user interface.\n"
+        "2. GENERAL / LEADERSHIP QUERIES: For questions about SBP leadership (e.g., Governor Jameel Ahmad), organizational structure, or official reports, rely on retrieved context or general official knowledge.\n"
+        "3. RESPONSE STRUCTURE: Always deliver a clear, high-level summary first covering the key points. DO NOT ask clarifying questions before answering.\n"
+        "4. FOLLOW-UP: End your response with EXACTLY ONE specific follow-up question to guide the user to the next logical topic."
+    )
+
+    if not groq_client:
+        return "**Demo mode:** add your free Groq API key to `.streamlit/secrets.toml` to generate AI answers.", citations
+
     # 5. Call Groq
-# 1. Define the function (citations is created INSIDE the function)
-# 1. Rename and update the function to handle context retrieval internally
-def generate_intelligent_answer(user_query):
-    citations_list = []
-    combined_context = ""
-    
     try:
-        # 1. Retrieve matching regulatory context from Pinecone
-        docs = vectorstore.similarity_search(user_query, k=3)
-        
-        if docs:
-            combined_context = "\n\n".join([doc.page_content for doc in docs])
-            
-            for idx, doc in enumerate(docs):
-                metadata = getattr(doc, 'metadata', {})
-                
-                source_val = (
-                    metadata.get("source") or 
-                    metadata.get("url") or 
-                    metadata.get("pdf_url") or 
-                    metadata.get("file_name") or 
-                    "SBP Circular PDF"
-                )
-                title_val = metadata.get("title") or metadata.get("file_name") or f"Document {idx + 1}"
-                page_val = metadata.get("page", 1)
-                
-                # 'ref' is explicitly defined here to satisfy render_citations() on line 413!
-                citation_item = {
-                    "ref": metadata.get("ref") or f"Doc {idx + 1}",
-                    "title": title_val,
-                    "source": source_val,
-                    "url": source_val,
-                    "link": source_val,
-                    "file_name": title_val,
-                    "page": page_val
-                }
-                
-                if citation_item not in citations_list:
-                    citations_list.append(citation_item)
-
-    except Exception as e:
-        print(f"Pinecone search warning: {e}")
-
-    # 2. PRESENTATION SAFETY NET (Ensures render_citations never fails if 0 docs returned)
-    if not citations_list:
-        citations_list = [{
-            "ref": "SBP Circular",
-            "title": "State Bank of Pakistan - Monetary Policy Statement",
-            "source": "https://www.sbp.org.pk/our-operations/monetary-policy",
-            "url": "https://www.sbp.org.pk/our-operations/monetary-policy",
-            "link": "https://www.sbp.org.pk/our-operations/monetary-policy",
-            "file_name": "SBP_Monetary_Policy_Statement.pdf",
-            "page": 1
-        }]
-
-    # 3. Call Groq LLM
-    try:
-        prompt_content = (
-            f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"
-            if combined_context else f"User Question: {user_query}"
-        )
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt_content}
+                {"role": "user", "content": f"Regulatory Documents:\n{combined_context}\n\nUser Question: {user_query}"}
             ],
             temperature=0.1
         )
-        return completion.choices[0].message.content, citations_list
+        return completion.choices[0].message.content, citations
     except Exception as e:
-        return f"Error connecting to AI engine: {e}", citations_list
+        return f"Unable to generate response via Groq. Error: {e}", citations
 
-# 2. Only call the function IF a user query actually exists
-if 'user_query' in locals() and user_query:
-    # Ensure combined_context has a fallback if not defined
-    if 'combined_context' not in locals():
-        combined_context = ""
-    
-    response_text, citations = generate_response(system_prompt, combined_context, user_query)
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. HEADER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -447,7 +382,6 @@ if not st.session_state.messages:
     cols = st.columns(2)
     for i, prompt in enumerate(STARTER_PROMPTS):
         with cols[i % 2]:
-            label = f"{prompt['icon']}&nbsp;&nbsp;{prompt['text']}"
             if st.button(prompt["text"], key=f"starter_{i}", use_container_width=True):
                 pending_query = prompt["text"]
 
