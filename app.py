@@ -1,16 +1,23 @@
 import os
+import json
 import uuid
 import streamlit as st
 from groq import Groq
 from pinecone import Pinecone
-from streamlit_local_storage import LocalStorage
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. PAGE CONFIG
+# 1. PAGE CONFIG & DEVICE URL IDENTIFIER
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
     page_title="SBP Regulatory Intelligence", page_icon="◈", layout="wide"
 )
+
+# Assign a unique persistent ID to this specific device/browser in the URL query string
+if "user_id" not in st.query_params:
+  st.query_params["user_id"] = str(uuid.uuid4())
+
+user_id = st.query_params["user_id"]
+DB_FILE = "chat_histories.json"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. CONFIGURATION & KEYS
@@ -203,7 +210,7 @@ st.markdown(
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. INITIALIZE CONNECTIONS & LOCAL STORAGE
+# 4. INITIALIZE CONNECTIONS & STORAGE HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_resource
 def init_services():
@@ -219,7 +226,24 @@ except Exception as e:
   st.error(f"Error initializing services: {e}")
   st.stop()
 
-localS = LocalStorage()
+
+def load_all_histories():
+  if os.path.exists(DB_FILE):
+    try:
+      with open(DB_FILE, "r") as f:
+        return json.load(f)
+    except json.JSONDecodeError:
+      return {}
+  return {}
+
+
+def save_all_histories(data):
+  try:
+    with open(DB_FILE, "w") as f:
+      json.dump(data, f)
+  except Exception:
+    pass
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. RETRIEVAL & REASONING PIPELINE
@@ -302,27 +326,30 @@ def generate_intelligent_answer(user_query):
   except Exception as e:
     return f"Unable to generate response via Groq. Error: {e}", citations
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. PERSISTENT BROWSER-LOCAL MULTI-CHAT MANAGEMENT
+# 6. PERSISTENT MULTI-CHAT MANAGEMENT PER DEVICE ID
 # ══════════════════════════════════════════════════════════════════════════════
-if "chats" not in st.session_state or "current_chat_id" not in st.session_state:
-  saved_state = localS.getItem("sbp_full_state")
-  if saved_state and isinstance(saved_state, dict):
-    st.session_state.chats = saved_state.get("chats", {})
-    st.session_state.current_chat_id = saved_state.get("current_chat_id", None)
-  
-  if not st.session_state.get("chats") or not st.session_state.get("current_chat_id") or st.session_state.current_chat_id not in st.session_state.chats:
+all_histories = load_all_histories()
+
+if "chats" not in st.session_state:
+  user_chats = all_histories.get(user_id, {})
+  if not user_chats:
     initial_id = str(uuid.uuid4())
-    st.session_state.chats = {initial_id: {"title": "New Chat", "messages": []}}
-    st.session_state.current_chat_id = initial_id
+    user_chats = {initial_id: {"title": "New Chat", "messages": []}}
+  st.session_state.chats = user_chats
+
+if "current_chat_id" not in st.session_state:
+  chat_keys = list(st.session_state.chats.keys())
+  st.session_state.current_chat_id = chat_keys[0] if chat_keys else str(uuid.uuid4())
+
 
 def persist_state():
-  # Bundle everything into a single dictionary to make only one localStorage call
-  payload = {
-      "chats": st.session_state.chats,
-      "current_chat_id": st.session_state.current_chat_id
-  }
-  localS.setItem("sbp_full_state", payload)
+  global all_histories
+  all_histories = load_all_histories()
+  all_histories[user_id] = st.session_state.chats
+  save_all_histories(all_histories)
+
 
 with st.sidebar:
   st.title("SBP Circulars AI")
@@ -391,6 +418,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 def render_citations(citations):
   if not citations:
     return
@@ -403,6 +431,7 @@ def render_citations(citations):
       for c in citations
   )
   st.markdown(f"<div class='citation-row'>{chips}</div>", unsafe_allow_html=True)
+
 
 current_id = st.session_state.current_chat_id
 current_messages = st.session_state.chats[current_id]["messages"]
