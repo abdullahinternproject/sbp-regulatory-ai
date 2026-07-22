@@ -219,7 +219,6 @@ except Exception as e:
   st.error(f"Error initializing services: {e}")
   st.stop()
 
-# Initialize Local Storage Manager
 localS = LocalStorage()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -306,24 +305,24 @@ def generate_intelligent_answer(user_query):
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. PERSISTENT BROWSER-LOCAL MULTI-CHAT MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
-if "chats" not in st.session_state:
-  saved_chats = localS.getItem("sbp_chats")
-  if saved_chats and isinstance(saved_chats, dict):
-    st.session_state.chats = saved_chats
-  else:
+if "chats" not in st.session_state or "current_chat_id" not in st.session_state:
+  saved_state = localS.getItem("sbp_full_state")
+  if saved_state and isinstance(saved_state, dict):
+    st.session_state.chats = saved_state.get("chats", {})
+    st.session_state.current_chat_id = saved_state.get("current_chat_id", None)
+  
+  if not st.session_state.get("chats") or not st.session_state.get("current_chat_id") or st.session_state.current_chat_id not in st.session_state.chats:
     initial_id = str(uuid.uuid4())
     st.session_state.chats = {initial_id: {"title": "New Chat", "messages": []}}
-
-if "current_chat_id" not in st.session_state:
-  saved_current_id = localS.getItem("sbp_current_chat_id")
-  if saved_current_id and saved_current_id in st.session_state.chats:
-    st.session_state.current_chat_id = saved_current_id
-  else:
-    st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
+    st.session_state.current_chat_id = initial_id
 
 def persist_state():
-  localS.setItem("sbp_chats", st.session_state.chats)
-  localS.setItem("sbp_current_chat_id", st.session_state.current_chat_id)
+  # Bundle everything into a single dictionary to make only one localStorage call
+  payload = {
+      "chats": st.session_state.chats,
+      "current_chat_id": st.session_state.current_chat_id
+  }
+  localS.setItem("sbp_full_state", payload)
 
 with st.sidebar:
   st.title("SBP Circulars AI")
