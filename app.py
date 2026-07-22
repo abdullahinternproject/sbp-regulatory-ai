@@ -3,6 +3,7 @@ import uuid
 import streamlit as st
 from groq import Groq
 from pinecone import Pinecone
+from streamlit_local_storage import LocalStorage
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. PAGE CONFIG
@@ -24,8 +25,8 @@ try:
 except Exception:
   st.error(
       "Missing `.streamlit/secrets.toml`. Create that file in the same folder "
-      "as updated_app.py with your PINECONE_API_KEY, PINECONE_INDEX_NAME, "
-      "PINECONE_NAMESPACE, and GROQ_API_KEY values."
+      "with your PINECONE_API_KEY, PINECONE_INDEX_NAME, PINECONE_NAMESPACE, "
+      "and GROQ_API_KEY values."
   )
   st.stop()
 
@@ -92,13 +93,6 @@ st.markdown(
     }
 
     /* ── Welcome / empty state ─────────────────────────────────────────── */
-    @media (prefers-reduced-motion: no-preference) {
-        .welcome-panel { animation: fadeUp 0.5s ease-out; }
-    }
-    @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(8px); }
-        to   { opacity: 1; transform: translateY(0); }
-    }
     .welcome-panel {
         padding: 6px 0 4px 0;
         margin-bottom: 6px;
@@ -119,7 +113,6 @@ st.markdown(
         max-width: 480px;
     }
 
-    /* Starter-question buttons (Streamlit st.button, restyled) */
     div[data-testid="stButton"] button {
         background: var(--surface) !important;
         border: 1px solid var(--line) !important;
@@ -138,15 +131,8 @@ st.markdown(
         border-color: var(--accent) !important;
         transform: translateY(-1px);
     }
-    div[data-testid="stButton"] button:focus-visible {
-        outline: 2px solid var(--accent) !important;
-        outline-offset: 2px;
-    }
 
     /* ── Messages ──────────────────────────────────────────────────────── */
-    @media (prefers-reduced-motion: no-preference) {
-        .msg-row { animation: fadeUp 0.3s ease-out; }
-    }
     .msg-row {
         margin-bottom: 16px;
         font-family: 'Manrope', sans-serif;
@@ -200,17 +186,10 @@ st.markdown(
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.72rem;
         color: var(--muted);
-        transition: border-color 0.15s ease;
     }
-    .citation-chip:hover { border-color: var(--accent); }
     .citation-ref { color: var(--text); font-weight: 500; }
-    .citation-chip a {
-        color: var(--accent);
-        text-decoration: none;
-    }
-    .citation-chip a:hover { text-decoration: underline; }
+    .citation-chip a { color: var(--accent); text-decoration: none; }
 
-    /* ── Streamlit chrome ──────────────────────────────────────────────── */
     [data-testid="stChatInput"] textarea {
         background: var(--surface) !important;
         border: 1px solid var(--line) !important;
@@ -218,28 +197,19 @@ st.markdown(
         color: var(--text) !important;
         font-family: 'Manrope', sans-serif !important;
     }
-    [data-testid="stChatInput"] textarea:focus {
-        border-color: var(--accent) !important;
-        box-shadow: 0 0 0 1px var(--accent) !important;
-    }
-    [data-testid="stSpinner"] p {
-        font-family: 'Manrope', sans-serif;
-        color: var(--accent);
-    }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. INITIALIZE CONNECTIONS
+# 4. INITIALIZE CONNECTIONS & LOCAL STORAGE
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_resource
 def init_services():
   pc = Pinecone(api_key=PINECONE_API_KEY)
   index_host = pc.describe_index(PINECONE_INDEX_NAME).host
   index = pc.Index(host=index_host)
-
   groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
   return index, groq_client
 
@@ -249,8 +219,11 @@ except Exception as e:
   st.error(f"Error initializing services: {e}")
   st.stop()
 
+# Initialize Local Storage Manager
+localS = LocalStorage()
+
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. INTELLIGENT RETRIEVAL & REASONING PIPELINE
+# 5. RETRIEVAL & REASONING PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 def generate_intelligent_answer(user_query):
   results = index.search(
@@ -331,12 +304,26 @@ def generate_intelligent_answer(user_query):
     return f"Unable to generate response via Groq. Error: {e}", citations
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. SESSION-BASED MULTI-CHAT MANAGEMENT
+# 6. PERSISTENT BROWSER-LOCAL MULTI-CHAT MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
 if "chats" not in st.session_state:
+  saved_chats = localS.getItem("sbp_chats")
+  if saved_chats and isinstance(saved_chats, dict):
+    st.session_state.chats = saved_chats
+  else:
     initial_id = str(uuid.uuid4())
     st.session_state.chats = {initial_id: {"title": "New Chat", "messages": []}}
-    st.session_state.current_chat_id = initial_id
+
+if "current_chat_id" not in st.session_state:
+  saved_current_id = localS.getItem("sbp_current_chat_id")
+  if saved_current_id and saved_current_id in st.session_state.chats:
+    st.session_state.current_chat_id = saved_current_id
+  else:
+    st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
+
+def persist_state():
+  localS.setItem("sbp_chats", st.session_state.chats)
+  localS.setItem("sbp_current_chat_id", st.session_state.current_chat_id)
 
 with st.sidebar:
   st.title("SBP Circulars AI")
@@ -344,6 +331,7 @@ with st.sidebar:
     new_id = str(uuid.uuid4())
     st.session_state.chats[new_id] = {"title": "New Chat", "messages": []}
     st.session_state.current_chat_id = new_id
+    persist_state()
     st.rerun()
 
   st.divider()
@@ -377,10 +365,12 @@ with st.sidebar:
                 "messages": [],
             }
             st.session_state.current_chat_id = fresh_id
+          persist_state()
           st.rerun()
     else:
       if st.button(title, key=f"btn_{chat_id}", use_container_width=True):
         st.session_state.current_chat_id = chat_id
+        persist_state()
         st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -427,7 +417,6 @@ STARTER_PROMPTS = [
 
 pending_query = None
 
-# Starter welcome panel (shown only if current chat has no messages)
 if not current_messages:
   st.markdown(
       """
@@ -448,7 +437,6 @@ if not current_messages:
       ):
         pending_query = prompt["text"]
 
-# Display active conversation messages
 for msg in current_messages:
   if msg["role"] == "user":
     st.markdown(
@@ -466,12 +454,10 @@ for msg in current_messages:
     if "citations" in msg and msg["citations"]:
       render_citations(msg["citations"])
 
-# Input handling
 typed_query = st.chat_input("Ask a compliance question...")
 user_query = typed_query or pending_query
 
 if user_query:
-  # Auto-title conversation on first query
   if not current_messages:
     short_title = (
         user_query[:22] + "..." if len(user_query) > 22 else user_query
@@ -491,6 +477,7 @@ if user_query:
   current_messages.append(
       {"role": "assistant", "content": answer, "citations": citations}
   )
+  persist_state()
 
   st.markdown(
       "<div class='msg-row msg-assistant'><span"
